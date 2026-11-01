@@ -1,0 +1,12 @@
+*inject
+
+[lua]
+function include_lua(engine)
+	e = engine
+	e:include("save:/inject.lua")
+end
+[/lua]
+
+[calllua function="include_lua"]
+
+[return]
