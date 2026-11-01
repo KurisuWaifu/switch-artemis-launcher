@@ -1,0 +1,28 @@
+#!/bin/bash
+set -e
+
+rm -f nora2_save.zip seedsow_save.zip
+
+pushd ./common >/dev/null
+zip -qr ../nora2_save.zip .
+zip -qr ../seedsow_save.zip .
+popd >/dev/null
+
+
+if [[ ! -d ./nora2_save ]]; then
+  echo "Missing ./nora2_save directory" >&2
+  exit 1
+fi
+
+pushd ./nora2_save >/dev/null
+zip -qr ../nora2_save.zip .
+popd >/dev/null
+
+if [[ ! -d ./seedsow_save ]]; then
+  echo "Missing ./seedsow_save directory" >&2
+  exit 1
+fi
+
+pushd ./seedsow_save >/dev/null
+zip -qr ../seedsow_save.zip .
+popd >/dev/null
