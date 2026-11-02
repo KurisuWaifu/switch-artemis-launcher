@@ -9,7 +9,9 @@ On-device, persistent userland exec demo through Artemis Engine visual novels
 
 ## Setup
 
-Use JKSV on a hacked Switch to restore the .zip from Releases page to the console, then use the official save transfer between consoles functionality to transfer it to Switch 2.
+Use JKSV on a Switch running Atmosphere to restore the .zip from Releases page to the console, then use the official save transfer between consoles functionality to transfer it to Switch 2.
+
+You need one Nintendo account connected to both consoles.
 
 It's also possible to use ns2jb with RPC to open the save and upload the files, but at time of writing not yet tested.
 
