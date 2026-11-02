@@ -13,6 +13,35 @@ Use JKSV on a hacked Switch to restore the .zip from Releases page to the consol
 
 It's also possible to use ns2jb with RPC to open the save and upload the files, but at time of writing not yet tested.
 
+## Updating
+
+The launcher has a fail-safe update mechanism implemented.
+
+The following core scripts can be updated by writing a script named `<name>2.lua`:
+- `core.lua`
+- `http.lua`
+- `inject.lua`
+
+In case something goes wrong you can just hold the `-` (minus) button on the controller during startup to load the original scripts.
+
+## Interacting with HTTP server
+
+```
+$ curl -X POST http://CONSOLE_IP:8080/eval -d 'print("hello world")'
+
+status: ok
+output:
+hello world
+```
+
+```
+$ curl -X PUT --data-binary @file.bin "http://CONSOLE_IP:8080/save?path=save:/file.bin"
+```
+
+```
+$ curl -X DELETE http://CONSOLE_IP:8080/delete?path=save:/file.bin
+```
+
 ## FAQ
 
 ### Is it an entry point like Smilebasic 4?

