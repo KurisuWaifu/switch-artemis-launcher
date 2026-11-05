@@ -79,6 +79,9 @@ local offsets_sdk = {
 	fs_session_pool = 0x03a8,
 	-- proxy +0x18: CMIF domain object id
 	fs_proxy_domain_id = 0x018,
+	-- TODO: find the correct offset
+	-- nn::fs::CommitSaveData
+	fs_commit_save_data = 0x05ae70,
 	-- nn::os::GetThreadPriority(ThreadType const*)
 	get_thread_priority = 0x0ad7f0,
 	-- nn::err::ShowApplicationError

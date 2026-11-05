@@ -167,6 +167,13 @@ local function run_eval(src)
 	return table.concat(lines, "\n") .. "\n"
 end
 
+local function commit_save()
+	local mount_name = "save"
+	local mount_ptr = data_addr(mount_name)
+	local res = i32(N.call_deep(N.sdk("fs_commit_save_data"), mount_ptr, 0, 0, 0, 0))
+	return res == 0
+end
+
 local function run_save(name, body)
 	local path, why = save_target(name)
 	if not path then
@@ -181,6 +188,11 @@ local function run_save(name, body)
 	if not ok then
 		return nil, tostring(werr)
 	end
+
+	if not commit_save() then
+		return nil, "commit error"
+	end
+
 	return #body .. " bytes to " .. path
 end
 
