@@ -607,6 +607,7 @@ local function setup()
 
 	_G.n2h = {
 		platform = is_ounce and "Ounce" or "NX",
+		game_id = "hamidashi",
 		main_base = main_base,
 		sdk_base = sdk_base,
 		gadgets = gadgets,

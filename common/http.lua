@@ -199,13 +199,14 @@ end
 local function handle(method, target, body)
 	local path, query = target:match("^([^?]*)(.*)$")
 	query = query:gsub("^%?", "")
+	local game_id = N.game_id or "no game id report! please update core.lua!"
 
 	if method == "GET" and (path == "/" or path == "/status") then
 		return respond(200, "OK", string.format(
-			"nora2hax/seedsow HTTP server\n" ..
+			"n2h HTTP server (%s)\n" ..
 			"POST /eval body=<lua>\n" ..
 			"PUT|POST /save?path=<name> body=<file>\n" ..
-			"DELETE /delete?path=<name>\n"))
+			"DELETE /delete?path=<name>\n", game_id))
 	end
 
 	if path == "/eval" then
