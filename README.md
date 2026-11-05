@@ -1,4 +1,4 @@
-# norahax / seedsowhax
+# norahax / seedsowhax / hamihax
 
 On-device, persistent userland exec demo through Artemis Engine visual novels
 
@@ -6,6 +6,7 @@ On-device, persistent userland exec demo through Artemis Engine visual novels
 
 - `010012900d38a000` - Nora, Princess and Crying Cat 2 **Demo** https://store-jp.nintendo.com/item/software/D70010000013424
 - `010042d022aea000` - Seedsow Lullaby **Demo** https://www.nintendo.com/us/store/products/seedsow-lullaby-switch/
+- `0100848014154000` - Hamidashi Creative **Demo** https://store-jp.nintendo.com/item/software/D70010000037967
 
 ## Setup
 

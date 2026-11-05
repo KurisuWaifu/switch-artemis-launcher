@@ -1,11 +1,12 @@
 #!/bin/bash
 set -e
 
-rm -f nora2_save.zip seedsow_save.zip
+rm -f nora2_save.zip seedsow_save.zip hamidashi_save.zip
 
 pushd ./common >/dev/null
 zip -qr ../nora2_save.zip .
 zip -qr ../seedsow_save.zip .
+zip -qr ../hamidashi_save.zip .
 popd >/dev/null
 
 
@@ -25,4 +26,13 @@ fi
 
 pushd ./seedsow_save >/dev/null
 zip -qr ../seedsow_save.zip .
+popd >/dev/null
+
+if [[ ! -d ./hamidashi_save ]]; then
+  echo "Missing ./hamidashi_save directory" >&2
+  exit 1
+fi
+
+pushd ./hamidashi_save >/dev/null
+zip -qr ../hamidashi_save.zip .
 popd >/dev/null
