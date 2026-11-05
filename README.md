@@ -45,6 +45,20 @@ $ curl -X PUT --data-binary @file.bin "http://CONSOLE_IP:8080/save?path=save:/fi
 $ curl -X DELETE http://CONSOLE_IP:8080/delete?path=save:/file.bin
 ```
 
+## How to update
+
+Two options:
+
+1. Either remake the save using the usual means (transfer or other entrypoint).
+
+2. Use the HTTP way of upgrading:
+
+```
+$ curl -X PUT --data-binary @GAME_HERE/core.lua "http://CONSOLE_IP:8080/save?path=save:/core2.lua"
+$ curl -X PUT --data-binary @common/http.lua "http://CONSOLE_IP:8080/save?path=save:/http2.lua"
+$ curl -X PUT --data-binary @common/inject.lua "http://CONSOLE_IP:8080/save?path=save:/inject2.lua"
+```
+
 ## FAQ
 
 ### Is it an entry point like Smilebasic 4?
@@ -65,6 +79,7 @@ You still can get those, though not yet supported:
 
 ## Credits
 
+- KurisuWaifu - adding Hamidashi Creative support
 - https://github.com/n0llptr/remote_lua_loader
 - https://github.com/Gezine/ArtemisLuaLoader
 - Proggy Clean TT font by Tristan Grimmer
