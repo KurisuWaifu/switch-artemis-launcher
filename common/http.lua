@@ -6,8 +6,8 @@ if N.block_raw and N.free then
 	N.block_raw = nil
 end
 
-local REQ_CAP = 0x8000
-local BODY_CAP = 0x7000
+local REQ_CAP = 0x40000
+local BODY_CAP = REQ_CAP - 0x1000
 local PORT = 8080
 
 local CONCURRENCY = 14
