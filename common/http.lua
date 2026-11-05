@@ -334,6 +334,38 @@ local function already_initialized(res)
 		and math.floor(res / 512) % 8192 == 2
 end
 
+local function get_switch_ip()
+	-- maintain backwards compatibility with original core.lua
+	local offsets = N.offsets_sdk
+	if not offsets.nifm_initialize or not offsets.nifm_get_current_primary_ip_address or not offsets.inet_ntop then
+		return nil
+	end
+
+	if N.call_deep(N.sdk("nifm_initialize")) ~= 0 then
+	    return nil
+	end
+
+	local addr = N.alloc(32)
+	local rc = N.call_deep(N.sdk("nifm_get_current_primary_ip_address"), addr)
+
+	if rc ~= 0 then
+		N.free(addr)
+		return nil
+	end
+
+	local ip = string.rep("\0", 64)
+	local AF_INET = 2
+	local ptr = N.call_deep(N.sdk("inet_ntop"), AF_INET, addr, data_addr(ip), #ip)
+
+	N.free(addr)
+
+	if ptr == 0 then
+		return nil
+	end
+
+	return ip:match("^[%d%.]+")
+end
+
 local function post_init()
 	local res = i32(N.call_deep(N.sdk("socket_initialize"), socket_pool,
 		0xC0000, 0x20000, CONCURRENCY))
@@ -371,7 +403,7 @@ local function post_init()
 
 	st.lfd = fd
 	st.phase = "accept"
-	log(string.format("HTTP server listening on http://CONSOLE_IP:%d", PORT))
+	log(string.format("HTTP server listening on http://%s:%d", get_switch_ip() or "CONSOLE_IP", PORT))
 end
 
 local function pump_accept()
