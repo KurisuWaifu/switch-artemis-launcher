@@ -138,12 +138,12 @@ local function run_eval(src)
 	local captured = {}
 	local saved = print
 	print = function(...)
-		local n = select("#", ...)
-		local parts = {}
-		for i = 1, n do
-			parts[i] = tostring((select(i, ...)))
-		end
-		captured[#captured + 1] = table.concat(parts, "\t")
+		local args = { ... }
+    	local parts = {}
+    	for i = 1, #args do
+        	parts[i] = tostring(args[i])
+    	end
+    	table.insert(captured, table.concat(parts, "\t"))
 	end
 	local fn, lerr = loadstring(src)
 	local ok, res
