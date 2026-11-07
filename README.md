@@ -1,4 +1,4 @@
-# norahax / seedsowhax / hamihax
+# norahax / nora2hax / seedsowhax / hamihax
 
 On-device, persistent userland exec demo through Artemis Engine visual novels
 
@@ -7,6 +7,7 @@ On-device, persistent userland exec demo through Artemis Engine visual novels
 - `010012900d38a000` - Nora, Princess and Crying Cat 2 **Demo** https://store-jp.nintendo.com/item/software/D70010000013424 (pulled from eShop)
 - `010042d022aea000` - Seedsow Lullaby **Demo** https://www.nintendo.com/us/store/products/seedsow-lullaby-switch/ (pulled from eShop)
 - `0100848014154000` - Hamidashi Creative **Demo** https://store-jp.nintendo.com/item/software/D70010000037967 (should be first when you type "iMel" on JP eShop)
+- `01002eb00ce48000` - Nora, Princess and Stray Cat HD **Demo** https://store-jp.nintendo.com/item/software/D70010000012253 (should be first when you type "harukaze" on JP eShop)
 
 ## Setup
 
@@ -73,13 +74,14 @@ Not yet, I told you to grab the demos :(
 
 ### I missed my opportunity to grab the demos above and they're pulled from eShop!
 
-You still can get those, though not yet supported:
+You still can get those:
 
-- `01002eb00ce48000` - Nora Princess and Stray Cat HD **Demo** https://store-jp.nintendo.com/item/software/D70010000012253
+- `0100848014154000` - Hamidashi Creative **Demo** https://store-jp.nintendo.com/item/software/D70010000037967
+- `01002eb00ce48000` - Nora, Princess and Stray Cat HD **Demo** https://store-jp.nintendo.com/item/software/D70010000012253
 
 ## Credits
 
-- KurisuWaifu - adding Hamidashi Creative support
+- KurisuWaifu - adding "Hamidashi Creative" and "Nora, Princess and Stray Cat HD" support
 - https://github.com/n0llptr/remote_lua_loader
 - https://github.com/Gezine/ArtemisLuaLoader
 - Proggy Clean TT font by Tristan Grimmer
